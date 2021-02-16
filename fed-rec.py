@@ -1,13 +1,17 @@
-import pandas as pd
+import random
+import time
+from copy import deepcopy
+
 import numpy as np
+import pandas as pd
+import syft as sy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.functional as f
 import torch.optim as optim
-
-import syft as sy
-import time
-from torch.utils.data import Dataset
+from syft.frameworks.torch.fl import utils
+from torch.utils.data import DataLoader, Dataset
 
 hook = sy.TorchHook(torch)
 
@@ -21,12 +25,6 @@ class Arguments:
 
 # bob = sy.VirtualWorker(hook, id="bob")  # <-- NEW: define remote worker bob
 # alice = sy.VirtualWorker(hook, id="alice")  # <-- NEW: and alice
-
-import torch
-import random
-import pandas as pd
-from copy import deepcopy
-from torch.utils.data import DataLoader, Dataset
 
 random.seed(0)
 
@@ -56,7 +54,7 @@ class UserItemRatingDataset(Dataset):
 # # base_federated=dataset.federate((bob, alice))
 # base = sample_generator.instance_a_train_loader(4, 32)
 rs_cols = ["user_id", "movie_id", "rating", "unix_timestamp"]
-train_data = pd.read_csv("Openmined-FL-Recommendation-System/Data/ua.base", sep="\t", names=rs_cols, encoding="latin-1")
+train_data = pd.read_csv("Data/ua.base", sep="\t", names=rs_cols, encoding="latin-1")
 user_ids = train_data["user_id"].unique().tolist()
 user2user_encoded = {x: i for i, x in enumerate(user_ids)}
 userencoded2user = {i: x for i, x in enumerate(user_ids)}
@@ -66,8 +64,9 @@ movie_encoded2movie = {i: x for i, x in enumerate(movie_ids)}
 train_data["user"] = train_data["user_id"].map(user2user_encoded)
 train_data["movie"] = train_data["movie_id"].map(movie2movie_encoded)
 
-num_users = len(user2user_encoded)
-num_movies = len(movie_encoded2movie)
+EMBEDDING_SIZE = 50
+NUM_USERS = len(user2user_encoded)
+NUM_MOVIES = len(movie_encoded2movie)
 train_data["rating"] = train_data["rating"].values.astype(np.float32)
 # federated_SVHN=UserItemRatingDataset(torch.LongTensor(train_data["user"]),torch.LongTensor(train_data["movie"]),torch.FloatTensor(train_data["rating"]))
 
@@ -96,18 +95,18 @@ federated_train_loader = sy.FederatedDataLoader(  # <-- this is now a FederatedD
 
 
 class Model(nn.Module):
-    def __init__(self, num_users, num_movies, embedding_size):
+    def __init__(self):
         super(Model, self).__init__()
-        self.num_users = num_users
-        self.num_movies = num_movies
-        self.embedding_size = embedding_size
+        self.num_users = NUM_USERS
+        self.num_movies = NUM_MOVIES
+        self.embedding_size = EMBEDDING_SIZE
 
-        self.user_embedding = nn.Embedding(num_users, embedding_size)
-        self.movie_embedding = nn.Embedding(num_movies, embedding_size)
+        self.user_embedding = nn.Embedding(NUM_USERS, EMBEDDING_SIZE)
+        self.movie_embedding = nn.Embedding(NUM_MOVIES, EMBEDDING_SIZE)
 
         self.fc_layers = nn.ModuleList()
         self.fc_layers.append(nn.Linear(50, 50))
-        self.output_layer = nn.Linear(embedding_size, 1)
+        self.output_layer = nn.Linear(EMBEDDING_SIZE, 1)
 
     def forward(self, train_data):
         users = torch.as_tensor(train_data[:, 0])
@@ -165,10 +164,6 @@ class Model(nn.Module):
 #     total_time = time.time() - start_time
 #     print('Communication time over the network', round(total_time, 2), 's\n')
 
-from syft.frameworks.torch.fl import utils
-import torch.nn as nn
-import torch.nn.functional as f
-
 
 def train_on_batches(worker, batches, model_in, device, lr):
     """Train the model on the worker on the provided batches
@@ -203,7 +198,11 @@ def train_on_batches(worker, batches, model_in, device, lr):
             loss_local = True
             print(
                 "Train Worker {}: [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    worker.id, batch_idx, len(batches), 100.0 * batch_idx / len(batches), loss.item(),
+                    worker.id,
+                    batch_idx,
+                    len(batches),
+                    100.0 * batch_idx / len(batches),
+                    loss.item(),
                 )
             )
 
@@ -270,8 +269,7 @@ def train(model, device, federated_train_loader, lr, federate_after_n_batches, a
     return model
 
 
-embed_size = 50
-model = Model(num_users, num_movies, embed_size)
+model = Model()
 optimizer = optim.SGD(model.parameters(), lr=0.1)
 lr = 0.1
 federate_after_n_batches = 50
@@ -280,3 +278,4 @@ for epoch in range(1, 5):
     print("Starting epoch {}/{}".format(epoch, 5))
     model = train(model, device, federated_train_loader, lr, federate_after_n_batches)
 
+torch.save(model, "movie-recommender.pt")
