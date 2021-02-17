@@ -1,5 +1,7 @@
 # Federated Recommender System with Syft
 
+Evaluating Syft for peer2peer, federated music recommendation
+
 ```language=bash
 git clone --recursive https://github.com/JCBrouwer/fedrecsys.git
 cd fedrecsys
