@@ -1,5 +1,5 @@
 MODEL_NAME = "mnist"
-MODEL_VERSION = "1.2.3"
+MODEL_VERSION = "1.2.3.4"
 GRID_ADDRESS = "127.0.0.1:5050"
 
 # ### Authentication (optional)

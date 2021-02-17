@@ -2,7 +2,9 @@ torch==1.4
 syft==0.2.9
 pyjwt==1.7.1
 
+pandas
 matplotlib
+
 gevent
 gevent-websocket
 pymysql
