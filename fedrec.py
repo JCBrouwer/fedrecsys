@@ -16,19 +16,6 @@ from torch.utils.data import DataLoader, Dataset
 hook = sy.TorchHook(torch)
 
 
-class Arguments:
-    def __init__(self):
-        self.batch_size = 1
-        self.test_batch_size = 50
-        self.seed = 1
-
-
-# bob = sy.VirtualWorker(hook, id="bob")  # <-- NEW: define remote worker bob
-# alice = sy.VirtualWorker(hook, id="alice")  # <-- NEW: and alice
-
-random.seed(0)
-
-
 class UserItemRatingDataset(Dataset):
     """Wrapper, convert <user, item, rating> Tensor into Pytorch Dataset"""
 
@@ -50,34 +37,22 @@ class UserItemRatingDataset(Dataset):
         return len(self.user_tensor)
 
 
-# sample_generator = SampleGenerator(ratings=ml1m_rating)
-# # base_federated=dataset.federate((bob, alice))
-# base = sample_generator.instance_a_train_loader(4, 32)
 rs_cols = ["user_id", "movie_id", "rating", "unix_timestamp"]
 train_data = pd.read_csv("Data/ua.base", sep="\t", names=rs_cols, encoding="latin-1")
+
 user_ids = train_data["user_id"].unique().tolist()
 user2user_encoded = {x: i for i, x in enumerate(user_ids)}
 userencoded2user = {i: x for i, x in enumerate(user_ids)}
+train_data["user"] = train_data["user_id"].map(user2user_encoded)
+
 movie_ids = train_data["movie_id"].unique().tolist()
 movie2movie_encoded = {x: i for i, x in enumerate(movie_ids)}
 movie_encoded2movie = {i: x for i, x in enumerate(movie_ids)}
-train_data["user"] = train_data["user_id"].map(user2user_encoded)
 train_data["movie"] = train_data["movie_id"].map(movie2movie_encoded)
 
-EMBEDDING_SIZE = 50
-NUM_USERS = len(user2user_encoded)
-NUM_MOVIES = len(movie_encoded2movie)
 train_data["rating"] = train_data["rating"].values.astype(np.float32)
-# federated_SVHN=UserItemRatingDataset(torch.LongTensor(train_data["user"]),torch.LongTensor(train_data["movie"]),torch.FloatTensor(train_data["rating"]))
-
-# workers=[bob,alice]
-# federated_train_loader = sy.FederatedDataLoader( # <-- this is now a FederatedDataLoader
-#                         UserItemRatingDataset(torch.LongTensor(train_data["user"]),torch.LongTensor(train_data["movie"]),torch.FloatTensor(train_data["rating"])).federate(tuple(workers)),batch_size=1024,shuffle=True,iter_per_worker=True)
-
-# Create virtual workers
 
 workers = []
-
 for user_id in user_ids:
     worker = sy.VirtualWorker(hook, id="user_" + str(user_id))
     workers.append(worker)
@@ -92,6 +67,10 @@ federated_train_loader = sy.FederatedDataLoader(  # <-- this is now a FederatedD
     shuffle=True,
     iter_per_worker=True,
 )
+
+EMBEDDING_SIZE = 50
+NUM_USERS = len(user2user_encoded)
+NUM_MOVIES = len(movie_encoded2movie)
 
 
 class Model(nn.Module):
@@ -110,59 +89,16 @@ class Model(nn.Module):
 
     def forward(self, train_data):
         users = torch.as_tensor(train_data[:, 0])
-        movies = torch.as_tensor(train_data[:, 1])
         user_embedding_x = self.user_embedding(users)
+
+        movies = torch.as_tensor(train_data[:, 1])
         movie_embedding_y = self.movie_embedding(movies)
+
         prod = torch.mul(user_embedding_x, movie_embedding_y)
-        # concatenate user and movie embeddings to form input to 1 dim
-        # x = torch.cat([user_embedding_x, movie_embedding_y], 1)
-
-        # for idx, _ in enumerate(range(len(self.fc_layers))):
-        #     x = self.fc_layers[idx](x)
-        #     x = F.dropout(x, p=0.2)
-        #     x = F.batch_norm(x)
-        #     x = F.relu(x)
-
         logit = self.output_layer(prod)
         # The sigmoid activation forces the rating to between 0 and 1
         rating = torch.sigmoid(logit)
         return rating
-
-
-# from syft.frameworks.torch.fl import utils
-# embed_size=50
-# model = Model(num_users,num_movies,embed_size)
-# optimizer = optim.SGD(model.parameters(), lr=0.1)
-# lr=0.1
-# def trainn():
-#     for epoch in range(0, 5):
-#         for batch_idx, (data, target) in enumerate(federated_train_loader):
-#             print(data.location)
-#             print(target.location)
-#             # send the model to the client device where the data is present
-#             model.send(data.location)
-#             # training the model
-#             optimizer.zero_grad()
-#             prediction = model(data)
-#             loss = F.mse_loss(prediction.view(-1), target)
-#             loss.backward()
-#             optimizer.step()
-#             # get back the improved model
-#             print(loss.get())
-#             model.get()
-#             return utils.federated_avg({
-#                 "model": model
-#             })
-
-
-# for epoch in range(5):
-#     start_time = time.time()
-#     print("Epoch Number {epoch + 1}")
-#     federated_model = trainn()
-#     model = federated_model
-# #     test(federated_model)
-#     total_time = time.time() - start_time
-#     print('Communication time over the network', round(total_time, 2), 's\n')
 
 
 def train_on_batches(worker, batches, model_in, device, lr):
@@ -188,11 +124,13 @@ def train_on_batches(worker, batches, model_in, device, lr):
     for batch_idx, (data, target) in enumerate(batches):
         loss_local = False
         data, target = data.to(device), target.to(device)
+
         optimizer.zero_grad()
         output = model(data)
         loss = f.mse_loss(output.view(-1), target)
         loss.backward()
         optimizer.step()
+
         if batch_idx % LOG_INTERVAL == 0:
             loss = loss.get()  # <-- NEW: get the loss back
             loss_local = True
