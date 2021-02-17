@@ -1,54 +1,21 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # Federated Learning - Model Centric MNIST Example: Train FL Model
-
-# 
-# In the "[01-Create Plan](../model-centric/02-ExecutePlan.ipynb)" notebook we created the model, training plan, and averaging plan, and then hosted all of them in PyGrid.
-# 
-# Such hosted FL model can be now trained using client libraries, SwiftSyft, KotlinSyft, syft.js.
-# 
-# In this notebook, we'll use FL Client included in the PySyft to do the training.
-# 
-# ### Credits:
-# - Original authors: 
-# 
-#  - Vova Manannikov - Github: [@vvmnnnkv](https://github.com/vvmnnnkv)
-# 
-# 
-# - Reviewers: 
-#  - Patrick Cason - Github: [@cereallcerny](https://github.com/cereallarceny)
-# 
-# 
-# - New Content tested and enriched by: 
-#  - Juan M. Aunon - Twitter: [@jm_aunon](https://twitter.com/jm_aunon) - Github: [@jmaunon](https://github.com/jmaunon)
-#  
-
-# In[ ]:
-
-
-%load_ext autoreload
-%autoreload 2
-import warnings
-warnings.filterwarnings("ignore")
-
-import torch as th
-from torchvision import datasets, transforms
-
-import numpy as np
-import urllib3
 import time
+import warnings
 
+import jwt
+import matplotlib.pyplot as plt
+import numpy as np
 import syft as sy
+import torch as th
+import urllib3
 from syft.federated.fl_client import FLClient
 from syft.federated.fl_job import FLJob
-from syft.grid.clients.model_centric_fl_client import ModelCentricFLClient
+from torchvision import datasets, transforms
 
+import config
+
+warnings.filterwarnings("ignore")
 urllib3.disable_warnings()
 sy.make_hook(globals())
-
-# In[ ]:
-
 
 private_key = """
 -----BEGIN RSA PRIVATE KEY-----
@@ -92,29 +59,15 @@ ZQIDAQAB
 -----END PUBLIC KEY-----
 """.strip()
 
-
 # Creating authentication token.
-
-# In[ ]:
-
-
-import jwt
-auth_token = jwt.encode({}, private_key, algorithm='RS256').decode('ascii')
-
+auth_token = jwt.encode({}, private_key, algorithm="RS256").decode("ascii")
 print(auth_token)
 
-
 # Define `on_accepted`, `on_rejected`, `on_error` handlers.
-# 
 # The main training loop is located inside `on_accepted` routine.
 
-# In[ ]:
-
-
 cycles_log = []
-status = {
-    "ended": False
-}
+status = {"ended": False}
 
 # Called when client is accepted into FL cycle
 def on_accepted(job: FLJob):
@@ -126,7 +79,7 @@ def on_accepted(job: FLJob):
     max_updates = cycle_params["max_updates"]
 
     mnist_dataset = th.utils.data.DataLoader(
-        datasets.MNIST('data', train=True, download=True, transform=transforms.ToTensor()),
+        datasets.MNIST("data", train=True, download=True, transform=transforms.ToTensor()),
         batch_size=batch_size,
         drop_last=True,
         shuffle=True,
@@ -154,6 +107,7 @@ def on_accepted(job: FLJob):
     # Save losses/accuracies from cycle
     cycles_log.append((losses, accuracies))
 
+
 # Called when the client is rejected from cycle
 def on_rejected(job: FLJob, timeout):
     if timeout is None:
@@ -162,59 +116,37 @@ def on_rejected(job: FLJob, timeout):
         print(f"Rejected from cycle with timeout: {timeout}")
     status["ended"] = True
 
+
 # Called when error occured
 def on_error(job: FLJob, error: Exception):
     print(f"Error: {error}")
     status["ended"] = True
 
 
-# We use same PyGrid Node where the model was hosted, the model name/version of hosted model.
-
-# In[ ]:
-
-
-# PyGrid Node address
-gridAddress = "ws://alice:5000"
-
-# Hosted model name/version
-model_name = "mnist"
-model_version = "1.0"
-
-
 # Let's define routine that creates FL client and starts the FL process.
-
-# In[ ]:
-
-
-#client.grid_worker.get_connection_speed(client.worker_id)
-
-
-# In[ ]:
 
 
 def new_job(self, model_name, model_version) -> FLJob:
-        if self.worker_id is None:
-            auth_response = self.grid_worker.authenticate(
-                self.auth_token, model_name, model_version
-            )
-            self.worker_id = auth_response["data"]["worker_id"]
-
-        job = FLJob(
-            fl_client=self,
-            grid_worker=self.grid_worker,
-            model_name=model_name,
-            model_version=model_version,
-        )
-        return job
-
-
-# In[ ]:
+    if self.worker_id is None:
+        auth_response = self.grid_worker.authenticate(self.auth_token, model_name, model_version)
+        self.worker_id = auth_response["data"]["worker_id"]
+    job = FLJob(
+        fl_client=self,
+        grid_worker=self.grid_worker,
+        model_name=model_name,
+        model_version=model_version,
+    )
+    return job
 
 
 def create_client_and_run_cycle():
-    client = FLClient(url=gridAddress, auth_token=auth_token, verbose=True)
-    client.worker_id = client.grid_worker.authenticate(client.auth_token,model_name,model_version)["data"]["worker_id"]
-    job = client.new_job(model_name, model_version)
+    client = FLClient(url=config.GRID_ADDRESS, auth_token=auth_token, verbose=True)
+    client.grid_worker.address = config.GRID_ADDRESS
+    # client.worker_id = client.grid_worker.authenticate(client.auth_token, config.MODEL_NAME, config.MODEL_VERSION)[
+    #     "data"
+    # ]["worker_id"]
+    # print(client.grid_worker.get_connection_speed(client.worker_id))
+    job = new_job(client, config.MODEL_NAME, config.MODEL_VERSION)
 
     # Set event handlers
     job.add_listener(job.EVENT_ACCEPTED, on_accepted)
@@ -226,37 +158,22 @@ def create_client_and_run_cycle():
 
 
 # Now we're ready to start FL training.
-# 
+#
 # We're going to run multiple "workers" until the FL model is fully done and see the progress.
-# 
+#
 # As we create & authenticate new client each time,
 # this emulates multiple different workers requesting a cycle and working on it.
-
-# In[ ]:
-
 
 while not status["ended"]:
     create_client_and_run_cycle()
     time.sleep(1)
 
-
 # Let's plot loss and accuracy statistics recorded from each worker.
 # Each such worker's statistics is drawn with different color.
-# 
+#
 # It's visible that loss/accuracy improvement occurs after each `max_diffs` reports to PyGrid,
 # because PyGrid updates the model and creates new checkpoint after
 # receiving `max_diffs` updates from FL clients.
-
-# In[ ]:
-
-
-get_ipython().system('pip install matplotlib')
-
-
-# In[ ]:
-
-
-import matplotlib.pyplot as plt
 
 fig, axs = plt.subplots(2, figsize=(10, 10))
 axs[0].set_title("Loss")
@@ -269,10 +186,4 @@ for i, cycle_log in enumerate(cycles_log):
     axs[1].plot(x, accuracies)
     offset += len(losses)
     print(f"Cycle {i + 1}:\tLoss: {np.mean(losses)}\tAcc: {np.mean(accuracies)}")
-
-
-# In[ ]:
-
-
-
-
+plt.show()

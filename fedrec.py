@@ -1,17 +1,12 @@
-import random
-import time
-from copy import deepcopy
-
 import numpy as np
 import pandas as pd
 import syft as sy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.functional as f
 import torch.optim as optim
 from syft.frameworks.torch.fl import utils
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 hook = sy.TorchHook(torch)
 
@@ -127,7 +122,7 @@ def train_on_batches(worker, batches, model_in, device, lr):
 
         optimizer.zero_grad()
         output = model(data)
-        loss = f.mse_loss(output.view(-1), target)
+        loss = F.mse_loss(output.view(-1), target)
         loss.backward()
         optimizer.step()
 
